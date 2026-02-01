@@ -1,0 +1,247 @@
+version: '3.8'
+
+services:
+  # PostgreSQL - Main database
+  postgres:
+    image: postgres:16-alpine
+    container_name: trading-postgres
+    environment:
+      POSTGRES_USER: trading
+      POSTGRES_PASSWORD: trading_password
+      POSTGRES_DB: trading_platform
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./infrastructure/postgres/init:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U trading -d trading_platform"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - trading-network
+
+  # TimescaleDB - Time series data
+  timescaledb:
+    image: timescale/timescaledb:latest-pg16
+    container_name: trading-timescale
+    environment:
+      POSTGRES_USER: trading
+      POSTGRES_PASSWORD: trading_password
+      POSTGRES_DB: market_data
+    ports:
+      - "5433:5432"
+    volumes:
+      - timescale_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U trading -d market_data"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - trading-network
+
+  # Redis - Cache and session store
+  redis:
+    image: redis:7-alpine
+    container_name: trading-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - trading-network
+
+  # Kafka - Message queue
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.5.0
+    container_name: trading-zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    networks:
+      - trading-network
+
+  kafka:
+    image: confluentinc/cp-kafka:7.5.0
+    container_name: trading-kafka
+    depends_on:
+      - zookeeper
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+    healthcheck:
+      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:9092"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - trading-network
+
+  # ClickHouse - Analytics
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.1-alpine
+    container_name: trading-clickhouse
+    ports:
+      - "8123:8123"
+      - "9000:9000"
+    volumes:
+      - clickhouse_data:/var/lib/clickhouse
+      - ./infrastructure/clickhouse/init:/docker-entrypoint-initdb.d
+    environment:
+      CLICKHOUSE_DB: analytics
+      CLICKHOUSE_USER: trading
+      CLICKHOUSE_PASSWORD: trading_password
+    networks:
+      - trading-network
+
+  # InfluxDB - Metrics
+  influxdb:
+    image: influxdb:2.7-alpine
+    container_name: trading-influxdb
+    ports:
+      - "8086:8086"
+    volumes:
+      - influxdb_data:/var/lib/influxdb2
+    environment:
+      DOCKER_INFLUXDB_INIT_MODE: setup
+      DOCKER_INFLUXDB_INIT_USERNAME: trading
+      DOCKER_INFLUXDB_INIT_PASSWORD: trading_password
+      DOCKER_INFLUXDB_INIT_ORG: trading-platform
+      DOCKER_INFLUXDB_INIT_BUCKET: metrics
+      DOCKER_INFLUXDB_INIT_ADMIN_TOKEN: trading-token
+    networks:
+      - trading-network
+
+  # MinIO - Object storage
+  minio:
+    image: minio/minio:latest
+    container_name: trading-minio
+    ports:
+      - "9001:9001"
+      - "9002:9002"
+    volumes:
+      - minio_data:/data
+    environment:
+      MINIO_ROOT_USER: trading
+      MINIO_ROOT_PASSWORD: trading_password
+    command: server /data --console-address ":9001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9002/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+    networks:
+      - trading-network
+
+  # Prometheus - Metrics collection
+  prometheus:
+    image: prom/prometheus:v2.48.0
+    container_name: trading-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./infrastructure/monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--storage.tsdb.retention.time=200h'
+      - '--web.enable-lifecycle'
+    networks:
+      - trading-network
+
+  # Grafana - Visualization
+  grafana:
+    image: grafana/grafana:10.2.0
+    container_name: trading-grafana
+    ports:
+      - "3001:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./infrastructure/monitoring/grafana/provisioning:/etc/grafana/provisioning
+    environment:
+      GF_SECURITY_ADMIN_USER: trading
+      GF_SECURITY_ADMIN_PASSWORD: trading_password
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    networks:
+      - trading-network
+
+  # Jaeger - Distributed tracing
+  jaeger:
+    image: jaegertracing/all-in-one:1.50
+    container_name: trading-jaeger
+    ports:
+      - "16686:16686"
+      - "14268:14268"
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+    networks:
+      - trading-network
+
+  # Elasticsearch - Search and logs
+  elasticsearch:
+    image: elasticsearch:8.11.0
+    container_name: trading-elasticsearch
+    ports:
+      - "9200:9200"
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+    volumes:
+      - elasticsearch_data:/usr/share/elasticsearch/data
+    networks:
+      - trading-network
+
+  # Kibana - Log visualization
+  kibana:
+    image: kibana:8.11.0
+    container_name: trading-kibana
+    ports:
+      - "5601:5601"
+    environment:
+      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+    depends_on:
+      - elasticsearch
+    networks:
+      - trading-network
+
+  # Mailhog - Email testing
+  mailhog:
+    image: mailhog/mailhog:latest
+    container_name: trading-mailhog
+    ports:
+      - "1025:1025"
+      - "8025:8025"
+    networks:
+      - trading-network
+
+volumes:
+  postgres_data:
+  timescale_data:
+  redis_data:
+  clickhouse_data:
+  influxdb_data:
+  minio_data:
+  prometheus_data:
+  grafana_data:
+  elasticsearch_data:
+
+networks:
+  trading-network:
+    driver: bridge

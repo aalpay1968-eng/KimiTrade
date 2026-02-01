@@ -1,0 +1,62 @@
+[package]
+name = "market-data"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "market-data"
+path = "src/main.rs"
+
+[dependencies]
+# Workspace dependencies
+tokio = { workspace = true }
+tokio-util = { workspace = true }
+tokio-stream = { workspace = true }
+axum = { workspace = true }
+tower = { workspace = true }
+tower-http = { workspace = true }
+hyper = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+metrics = { workspace = true }
+metrics-exporter-prometheus = { workspace = true }
+redis = { workspace = true }
+sqlx = { workspace = true }
+rdkafka = { workspace = true }
+reqwest = { workspace = true }
+chrono = { workspace = true }
+uuid = { workspace = true }
+validator = { workspace = true }
+config = { workspace = true }
+dotenvy = { workspace = true }
+futures = { workspace = true }
+tokio-tungstenite = { workspace = true }
+dashmap = { workspace = true }
+moka = { workspace = true }
+itertools = { workspace = true }
+rayon = { workspace = true }
+once_cell = { workspace = true }
+parking_lot = { workspace = true }
+
+# Shared crates
+trading-types = { workspace = true }
+
+# Additional dependencies
+async-trait = "0.1"
+backoff = { version = "0.4", features = ["tokio"] }
+flate2 = "1.0"
+tar = "0.4"
+
+[dev-dependencies]
+mockall = { workspace = true }
+testcontainers = { workspace = true }
+criterion = { workspace = true }
+tokio-test = "0.4"
+wiremock = "0.6"
